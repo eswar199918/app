@@ -2,40 +2,46 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_NAME = "devops-app:latest"
+        IMAGE_NAME = "eswar199918/flask-devops"
+        TAG = "latest"
+        K8S_IP = "54.165.171.216"
     }
 
     stages {
-
-        stage('Checkout Code') {
+        stage('Checkout') {
             steps {
-                git 'https://github.com/eswar199918/devops-basic-project.git'
+                git branch: 'main', url: 'https://github.com/eswar199918/app.git'
             }
         }
 
-        stage('SonarQube Code Scan') {
+        stage('Build Docker Image') {
             steps {
-                withSonarQubeEnv('sonarqube') {
-                    sh 'sonar-scanner'
+                sh "docker build -t ${IMAGE_NAME}:${TAG} ."
+            }
+        }
+
+        stage('Login DockerHub') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+                    sh "echo $PASS | docker login -u $USER --password-stdin"
                 }
             }
         }
 
-        stage('Docker Build') {
+        stage('Push Image') {
             steps {
-                sh 'docker build -t $IMAGE_NAME .'
+                sh "docker push ${IMAGE_NAME}:${TAG}"
             }
         }
 
-        stage('Trivy Image Scan') {
+        stage('Deploy to Kubernetes') {
             steps {
-                sh 'trivy image --severity HIGH,CRITICAL --exit-code 0 $IMAGE_NAME'
-            }
-        }
-
-        stage('Deploy to K3s') {
-            steps {
-                sh 'kubectl apply -f k8s/'
+                sh """
+                ssh -o StrictHostKeyChecking=no ubuntu@${K8S_IP} 'kubectl apply -f -' < k8s/namespace.yaml
+                ssh -o StrictHostKeyChecking=no ubuntu@${K8S_IP} 'kubectl apply -f -' < k8s/deployment.yaml
+                ssh -o StrictHostKeyChecking=no ubuntu@${K8S_IP} 'kubectl apply -f -' < k8s/service.yaml
+                ssh -o StrictHostKeyChecking=no ubuntu@${K8S_IP} 'kubectl apply -f -' < k8s/ingress.yaml
+                """
             }
         }
     }
